@@ -56,25 +56,25 @@ class AutomataExtended(DFA):
         input_symbols = params["input_symbols"]
         transitions = params["transitions"]
         isAWell = True
-
         for symbol in input_symbols:
             if symbol in transitions[node].keys():
                 if transitions[node][symbol] != node:
                     isAWell = False
+            else:
+                isAWell = False
 
         return isAWell
 
     def thereIsAWell(self):
         params = self.input_parameters
         states = params["states"]
-        input_symbols = params["input_symbols"]
         well = None
 
         for state in states:
             if self.isAWell(state):
                 well = state
 
-        return state
+        return well
 
 
     def completion(self):
