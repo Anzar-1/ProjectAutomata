@@ -45,7 +45,6 @@ class AutomataExtended(DFA):
     
         for a in states:
             for symbol in input_symbols:
-                print(transitions[a].keys())
                 if not symbol in transitions[a].keys():
                     isComplete = False
 
@@ -65,7 +64,7 @@ class AutomataExtended(DFA):
 
         return isAWell
 
-    def thereIsAWell(self):
+    def thereIsAWell(self): #fonction qui vérifie si l'automate a un noeud puit
         params = self.input_parameters
         states = params["states"]
         well = None
@@ -77,35 +76,82 @@ class AutomataExtended(DFA):
         return well
 
 
-    def completion(self):
-        if not self.isComplete():
-            return #ça renvoie None
+    def completion(self): #Complete l'automate
+        if self.isComplete():
+            return self
 
         params = self.input_parameters
-        states = params["states"]
-        input_symbols = params["input_symbols"]
-        transitions = params["transitions"]
+        states = set(self.states)
+        input_symbols = set(self.input_symbols)
+        transitions = {
+            state: dict(self.transitions[state])
+            for state in self.states }
 
-        #Tu check si tout les états on une transition vers chacun des etats
-        for a in states:
-            for b in input_symbols:
-                #Si il existe une transition de a vers b, on la crée la transition vers un état puit.
-                #Jsp is je fais genre, je cherche si de base y a un etat non accepteur dont toute les transition
-                #mène a lui même, et je l'utilise, sinon je le crée, où je crée un truc dans tout les 
-                #cas et je minimize l'automate
-                pass
-        pass
-        #Après je creer une nouvelle automate avec ces parametres et je la renvoie
+
+        well = self.thereIsAWell()
+        if well is None: #Si l epuit n'existe pas, on le crée
+            well = "well"
+            states.add(well)
+            transitions[well] = {}
+
+        #Alors, ça va pas marcher parce que c'est des frozen dictionary. 
+        #Je sais pas trop comment les copier pour l'instant
+        for state in states:
+            for symbol in input_symbols:
+                if not symbol in transitions[state].keys():
+                        transitions[state][symbol] = well
+
+        self.input_parameters["state"] = states
+        self.input_parameters["transitions"] = transitions
+
+        return DFA(
+            states=states,
+            input_symbols=input_symbols,
+            transitions=transitions,
+            initial_state=self.initial_state,
+            final_states=set(self.final_states)
+        )
     
 
-    def complementarity(self):
-        self.completion()
-        params = self.input_parameters
-        states = params["states"]
-        final_state = params["final_states"]
+    def complementarity(self): #Donne la complementaire de l'automate
+        self = self.completion()
+        states = set(self.states)
+        input_symbols = set(self.input_symbols)
 
-        #Je check si l'état est dans final states. si il l'est, je l'enleve, si il ne l'est pas, je le mets dedans
-        for a in states:
-            pass
+        transitions = {
+            state: dict(self.transitions[state])
+            for state in self.states
+        }
+
+        final_states = states - set(self.final_states)
+
+        return DFA(
+            states=states,
+            input_symbols=input_symbols,
+            transitions=transitions,
+            initial_state=self.initial_state,
+            final_states=final_states
+        )
+
+    def accessible_states(self): #ça fait un parcours pour pouvoir renvoyer la liste des états accessible
+        to_visit = [self.initial_state]
+        visited = set()
+
+        while to_visit:
+            state = to_visit.pop()
+
+            if state in visited:
+                continue
+
+            visited.add(state)
+
+            for symbol in self.input_symbols:
+                if symbol in self.transitions[state].keys():
+                    next_state = self.transitions[state][symbol]
+
+                    if next_state not in visited:
+                        to_visit.append(next_state)
+
+        return visited
+
         
-        #Après je creer une nouvelle automate avec ces parametres et je la renvoie
