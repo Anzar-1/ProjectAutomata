@@ -24,8 +24,7 @@ from typing import (
 
 import numpy as np
 from PIL import Image
-from pyautotrace import Bitmap
-from pyautotrace import VectorFormat
+from potrace import Bitmap, POTRACE_TURNPOLICY_MINORITY 
 
 class AutomataExtended(DFA):
 
@@ -388,17 +387,63 @@ class AutomataExtended(DFA):
 
     def to_pdf(self,file_name):
         image = Image.open(file_name).convert("RGB")
-        bitmap_data = np.array(image)
-        bitmap = Bitmap(bitmap_data)
-        vector = bitmap.trace()
-        vector.save("output_image.pdf", format=VectorFormat.PDF)
+        image.save("output.pdf")
 
-    def to_svg(self, file_name):
-        image = Image.open(file_name).convert("RGB")
-        bitmap_data = np.array(image)
-        bitmap = Bitmap(bitmap_data)
-        vector = bitmap.trace()
-        vector.save("output_image.svg")
+    def to_TikZ(self, file_name): #Je sais pas trop encore pour ça.
+        img = Image.open(file_name).convert("RGB")
+
+        with open("output.tex", "w") as f:
+            f.write(r"\begin{tikzpicture}" + "\n")
+
+            for y in range(img.height):
+                for x in range(img.width):
+                    r, g, b = img.getpixel((x, y))
+
+                    if (r, g, b) != (255, 255, 255):
+                        f.write(
+                            f"\\fill[fill={{rgb,255:red,{r};green,{g};blue,{b}}}] "
+                            f"({x},{-y}) rectangle ({x+1},{-y-1});\n"
+                        )
+
+            f.write(r"\end{tikzpicture}" + "\n")
+
+    def to_svg(self, filename):
+        try:
+            image = Image.open(filename)
+        except IOError:
+            print("Image (%s) could not be loaded." % filename)
+            return
+
+        bm = Bitmap(image, blacklevel=0.5)
+        # bm.invert()
+        plist = bm.trace(
+            turdsize=2,
+            turnpolicy=POTRACE_TURNPOLICY_MINORITY,
+            alphamax=1,
+            opticurve=False,
+            opttolerance=0.2,
+        )
+        with open(f"output.svg", "w") as fp:
+            fp.write(
+                f'''<svg version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="{image.width}" height="{image.height}" viewBox="0 0 {image.width} {image.height}">''')
+            parts = []
+            for curve in plist:
+                fs = curve.start_point
+                parts.append(f"M{fs.x},{fs.y}")
+                for segment in curve.segments:
+                    if segment.is_corner:
+                        a = segment.c
+                        b = segment.end_point
+                        parts.append(f"L{a.x},{a.y}L{b.x},{b.y}")
+                    else:
+                        a = segment.c1
+                        b = segment.c2
+                        c = segment.end_point
+                        parts.append(f"C{a.x},{a.y} {b.x},{b.y} {c.x},{c.y}")
+                parts.append("z")
+            fp.write(f'<path stroke="none" fill="black" fill-rule="evenodd" d="{"".join(parts)}"/>')
+            fp.write("</svg>")
+
 
 
 
