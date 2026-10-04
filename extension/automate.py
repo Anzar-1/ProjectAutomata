@@ -21,6 +21,12 @@ from typing import (
     cast,
 )
 
+
+import numpy as np
+from PIL import Image
+from pyautotrace import Bitmap
+from pyautotrace import VectorFormat
+
 class AutomataExtended(DFA):
 
     #Algorithme classique
@@ -64,6 +70,7 @@ class AutomataExtended(DFA):
                 if transitions[node][symbol] != node:
                     isAWell = False
             else:
+                #Je suis pas très sur de ce côté là.
                 isAWell = False
 
         return isAWell
@@ -231,7 +238,128 @@ class AutomataExtended(DFA):
             initial_state=self.initial_state,
             final_states=final_states,
             allow_partial= True           
-        ) 
+        )
+
+    def print_pair_table(self,show_round: bool): #ça imprime la table là des paires equivalent/dinstingable
+
+        finished : bool = False
+        modified : bool = False
+        states = self.states
+        input_symbols = self.input_symbols
+        transitions = self.transitions
+        final_states = self.final_states
+        print("Final states : ", final_states)
+        table = {
+            state1: {
+                state2: None
+                for state2 in states
+            }
+            for state1 in states
+        }
+
+        i : int= 0
+
+        #Etats finaux/ non états finaux sont mis à zero
+
+        for state1 in states:
+            for state2 in states:
+                if state1 == state2:
+                    continue
+                
+                elif ((state1 in final_states and not state2 in final_states) 
+                    or (state2 in final_states and not state1 in final_states)):
+                    if show_round:  
+                        table[state1][state2] = "0"
+                    else :
+                        table[state1][state2] = 'X'
+
+
+        while not finished:
+            modified = False
+            for state1 in states:
+                for state2 in states:
+                    if state1 == state2:
+                        continue
+
+                    #Si la transition existe et qu'on l'a pas défini on le mets dans le tableau
+                    for a in input_symbols:
+                        if(a in transitions[state1].keys() and a in transitions[state2].keys()):
+                            if (table[transitions[state1][a]][transitions[state2][a]] not in ["[]" , None]
+                                and table[state1][state2] == None):
+
+                                if show_round:
+                                    table[state1][state2] = str(i)
+                                else:
+                                    table[state1][state2] = 'X'
+                                modified = True
+
+                                break
+
+                    if (table[state1][state2] == None or table[state1][state2] == "[]" ):
+                        table[state1][state2] = "[]"
+
+            if not modified:
+                finished = True
+
+            i += 1
+
+        self.print_The_actual_pair_table(table,states)
+
+        return table
+    
+    def print_The_actual_pair_table(self, table : dict, states):
+
+        #Ici ça print la pyramide;
+
+        treated = set()
+
+        print("      " + "   ".join(states))
+      
+        for row in states:
+            values = []
+
+            for col in states:
+                pair = frozenset((row, col))
+
+                if pair in treated or row == col:
+                    values.append(" ")
+                else:
+                    value = table[row][col]
+                    values.append(" " + value)
+
+                    treated.add(pair)
+
+            print(f"{row}   " + "   ".join(values))
+        pass
+
+
+    def quotient(self): #C'est l'algorithme minimize mais qui montre les ensembles qui on été assemblé.
+        table = self.print_pair_table(True)
+        states = set(self.states)
+        transitions = {
+                    state: dict(self.transitions[state])
+                    for state in self.states
+                }
+        initial_state = self.initial_state
+
+        #Je dois changer l'autre algo pour qu'il me donne juste un bout du triangle mdr.
+        for state1 in states:
+            for states2 in states:
+                if table[state1][states2] == '[]':
+                    states.remove(state1); states.remove(states2); states.add("{"+ state1 +" ; " + states2 + "}")
+                    transitions["{"+ state1 +" ; " + states2 + "}"]= transitions[state1]
+                    transitions.pop(state1), transitions.pop(states2)
+                    if states2 == initial_state or state1 == initial_state:
+                        initial_state = "{"+ state1 +" ; " + states2 + "}"
+
+
+        return DFA(
+            states=states,
+            input_symbols=self.input_symbols,
+            transitions=transitions,
+            initial_state=initial_state,
+            final_states=self.final_states
+        )
 
 
     #Relation sur les automates:
@@ -245,6 +373,8 @@ class AutomataExtended(DFA):
         return first_automate == second_automate
 
     def language_subset(self, other): #Verifie si le language de l'un d'entre eu est subset de l'autre
+        #De base j'avais l'intention de le faire avec regex, mais je viens de me rendre compte que y a une 
+        #fonction pour ça issuperset(re1, re2, *, input_symbols=None)
 
         not_self = self.complementarity()
         not_other = other.complementarity()
@@ -253,8 +383,23 @@ class AutomataExtended(DFA):
 
         return (intersection_other_in_self.isempty() or intersection_self_in_other.isempty())
 
+    #J'ai pas encore fait "is isomorphic" parce que je sais pas ce que ça veut dire.
 
-            
+
+    def to_pdf(self,file_name):
+        image = Image.open(file_name).convert("RGB")
+        bitmap_data = np.array(image)
+        bitmap = Bitmap(bitmap_data)
+        vector = bitmap.trace()
+        vector.save("output_image.pdf", format=VectorFormat.PDF)
+
+    def to_svg(self, file_name):
+        image = Image.open(file_name).convert("RGB")
+        bitmap_data = np.array(image)
+        bitmap = Bitmap(bitmap_data)
+        vector = bitmap.trace()
+        vector.save("output_image.svg")
+
 
 
 
