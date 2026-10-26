@@ -21,6 +21,10 @@ from typing import (
     cast,
 )
 
+import json
+from collections import defaultdict
+from pyvis.network import Network
+
 
 import numpy as np
 from PIL import Image
@@ -28,7 +32,9 @@ from potrace import Bitmap, POTRACE_TURNPOLICY_MINORITY
 
 class AutomataExtended(DFA):
 
+    #-------------------------------------------------------
     #Algorithme classique
+    #-------------------------------------------------------
 
     def __init__(self,*,states: AbstractSet[fa.FAStateT],input_symbols: AbstractSet[str],
                  transitions:  Mapping[fa.FAStateT, Mapping[str, fa.FAStateT]],
@@ -230,14 +236,14 @@ class AutomataExtended(DFA):
                     destination = self.transitions[state][symbol]
                     new_transitions[destination][symbol].add(state)
 
-        return NFA(
+        return DFA.from_nfa(NFA(
             states=states,
             input_symbols=input_symbols,
             transitions=new_transitions,
             initial_state=self.initial_state,
             final_states=final_states,
             allow_partial= True           
-        )
+        ))
 
     def print_pair_table(self,show_round: bool): #ça imprime la table là des paires equivalent/dinstingable
 
@@ -334,44 +340,94 @@ class AutomataExtended(DFA):
 
     def quotient(self): #C'est l'algorithme minimize mais qui montre les ensembles qui on été assemblé.
         table = self.print_pair_table(True)
-        states = set(self.states)
+        states = self.states
+        new_states = set(self.states)
         transitions = {
                     state: dict(self.transitions[state])
                     for state in self.states
                 }
         initial_state = self.initial_state
+        final_states = set(self.final_states)
+        treated = set()
+
+        print("final state : type : ", type(final_states))
 
         #Je dois changer l'autre algo pour qu'il me donne juste un bout du triangle mdr.
         for state1 in states:
             for states2 in states:
-                if table[state1][states2] == '[]':
-                    states.remove(state1); states.remove(states2); states.add("{"+ state1 +" ; " + states2 + "}")
+                pair = frozenset((state1, states2))
+                if table[state1][states2] == '[]' and pair not in treated:
+
+                    new_states.remove(state1); new_states.remove(states2); 
+                    new_states.add("{"+ state1 +" ; " + states2 + "}")
+
+                    for state in states:
+                        for a in self.input_symbols:
+                            if transitions[state][a] == state1 or transitions[state][a] == states2:
+                                transitions[state][a] = "{"+ state1 +" ; " + states2 + "}"
+
                     transitions["{"+ state1 +" ; " + states2 + "}"]= transitions[state1]
                     transitions.pop(state1), transitions.pop(states2)
+
+                    treated.add(pair)
+
                     if states2 == initial_state or state1 == initial_state:
                         initial_state = "{"+ state1 +" ; " + states2 + "}"
 
+                    if state1 in final_states and states2 in final_states:
+                        final_states.add("{"+ state1 +" ; " + states2 + "}")                        
+                        final_states.remove(state1)
+                        final_states.remove(states2)
+                    elif state1 in final_states:
+                        final_states.remove(state1)
+                    elif states2 in final_states:
+                        final_states.remove(states2)
 
         return DFA(
-            states=states,
+            states=new_states,
             input_symbols=self.input_symbols,
             transitions=transitions,
             initial_state=initial_state,
-            final_states=self.final_states
+            final_states=final_states,
+            allow_partial=True
         )
 
-
+    #-------------------------------------------------------
     #Relation sur les automates:
+    #-------------------------------------------------------
 
-    #IsDisjoint existe déjà, is_equivalent() et laguage_equal sont aussi pareil
+    def is_isomorphic(self, other) -> bool:
+        regex1 = GNFA.from_dfa(self).to_regex()
+        regex2 = GNFA.from_dfa(other).to_regex()
 
-    def is_equivalent(self,other): #Verifie si les deux languages sont equivalents
+        nbrState1 =  len(self.states)
+        nbrState2 =  len(other.states)
+
+        alphabet1 = self.input_symbols
+        alphabet2 = other.input_symbols
+
+        finalState1 = len(self.final_states)
+        finalState2 = len(other.final_states)
+
+        return regex1 == regex2 and nbrState1 == nbrState2 and alphabet1 == alphabet2 and finalState1 == finalState2
+
+
+    def is_equivalent(self,other) -> bool: #Verifie si les deux languages sont equivalents
         first_automate = GNFA.from_dfa(self).to_regex()
         second_automate = GNFA.from_dfa(other).to_regex()
 
         return first_automate == second_automate
+    
+    def laguage_equal(self,other) -> bool: #Verifie si les deux languages sont equivalents
+            first_automate = GNFA.from_dfa(self).to_regex()
+            second_automate = GNFA.from_dfa(other).to_regex()
+    
+            return first_automate == second_automate
 
-    def language_subset(self, other): #Verifie si le language de l'un d'entre eu est subset de l'autre
+    def language_disjoint(self, other) -> bool:
+        return self.isdisjoint(other)
+
+    def language_subset(self, other) -> bool: #Verifie si le language de l'un d'entre eu est subset de l'autre
         #De base j'avais l'intention de le faire avec regex, mais je viens de me rendre compte que y a une 
         #fonction pour ça issuperset(re1, re2, *, input_symbols=None)
 
@@ -384,6 +440,9 @@ class AutomataExtended(DFA):
 
     #J'ai pas encore fait "is isomorphic" parce que je sais pas ce que ça veut dire.
 
+    #-------------------------------------------------------
+    #Transformation vers d'autres formats
+    #-------------------------------------------------------
 
     def to_pdf(self,file_name):
         image = Image.open(file_name).convert("RGB")
@@ -444,9 +503,236 @@ class AutomataExtended(DFA):
             fp.write(f'<path stroke="none" fill="black" fill-rule="evenodd" d="{"".join(parts)}"/>')
             fp.write("</svg>")
 
+    #-------------------------------------------------------
+    #Run et animation
+    #-------------------------------------------------------
+
+    def run(self,word: str):
+        state= self.initial_state
+        path: list =[]; path.append(state)
+        transitions = {
+                            state: dict(self.transitions[state])
+                            for state in self.states
+                        }
+        alphabet = self.input_symbols
+        i: int = 0
+
+        while(i!=len(word) and word[i] in alphabet and word[i] in transitions[state]):
+            state = transitions[state][word[i]]
+            path.append(state)
+            i+=1
+
+        if state in self.final_states:
+            path.append("accept")
+        else:
+            path.append("reject")
+
+        print(f" " + " -> ".join(path))
+
+        return path
 
 
+    def animate(self, input_string, delay=800, output="dfa.html"):
+        # Get the execution trace from your existing run() method.
+        path = self.run(input_string)
+        accepted = True if path[len(path)-1 ]== 'accept' else False
 
+        # Create the graph.
+        net = Network(
+            height="600px",
+            width="100%",
+            directed=True,
+            bgcolor="#ffffff",
+            font_color="#222222",
+            cdn_resources="in_line",
+        )
 
+        # Group transitions with the same source and destination.
+        grouped = defaultdict(list)
+        for source, transitions in self.transitions.items():
+            for symbol, target in transitions.items():
+                grouped[(source, target)].append(symbol)
 
+        # Add states.
+        states = set(self.transitions)
+        for transitions in self.transitions.values():
+            states.update(transitions.values())
+
+        for state in states:
+            is_final = state in self.final_states
+
+            net.add_node(
+                state,
+                label=state,
+                shape="circle",
+                size=30,
+                color={
+                    "background": "#dcfce7" if is_final else "#e5e7eb",
+                    "border": "#16a34a" if is_final else "#6b7280",
+                },
+                borderWidth=3 if is_final else 1,
+            )
+
+        # Add labeled, directed edges with stable IDs.
+        edge_ids = {}
+        for index, ((source, target), symbols) in enumerate(grouped.items()):
+            edge_id = f"edge_{index}"
+            edge_ids[(source, target)] = edge_id
+
+            net.add_edge(
+                source,
+                target,
+                id=edge_id,
+                label=", ".join(sorted(symbols)),
+                arrows="to",
+                color="#9ca3af",
+                width=2,
+            )
+
+        # Mark the initial state with an incoming arrow.
+        net.add_node("__start__", label="", shape="text")
+        net.add_edge("__start__", self.initial_state, arrows="to")
+
+        # Generate the HTML graph.
+        html = net.generate_html()
+
+        # Determine which transitions the input actually follows.
+        steps = []
+        for i, symbol in enumerate(input_string):
+            source = path[i]
+            target = path[i + 1]
+            steps.append({
+                "state": source,
+                "next": target,
+                "symbol": symbol,
+                "edge": edge_ids[(source, target)],
+            })
+
+        animation_data = json.dumps({
+            "steps": steps,
+            "path": path,
+            "accepted": accepted,
+            "delay": delay,
+        })
+
+        # Add JavaScript that animates the existing graph.
+        script = f"""
+        <div style="padding:12px;font-family:Arial,sans-serif">
+            <button id="play">▶ Play animation</button>
+            <button id="reset">↺ Reset</button>
+            <span id="status" style="margin-left:16px">
+                Ready to run
+            </span>
+        </div>
+
+        <script>
+        (() => {{
+            const data = {animation_data};
+            const originalNodes = nodes.get();
+            const originalEdges = edges.get();
+
+            let timer = null;
+
+            function reset() {{
+                if (timer !== null) clearTimeout(timer);
+                timer = null;
+
+                nodes.update(originalNodes.map(n => ({{
+                    id: n.id,
+                    color: n.color
+                }})));
+
+                edges.update(originalEdges.map(e => ({{
+                    id: e.id,
+                    color: e.color,
+                    width: e.width
+                }})));
+
+                document.getElementById("status").textContent =
+                    "Ready to run";
+            }}
+
+            function play() {{
+                reset();
+                let i = 0;
+
+                function step() {{
+                    if (i >= data.steps.length) {{
+                        const last = data.path[data.path.length - 1];
+                        nodes.update({{
+                            id: last,
+                            color: {{
+                                background: data.accepted
+                                    ? "#86efac" : "#fca5a5",
+                                border: data.accepted
+                                    ? "#15803d" : "#dc2626"
+                            }}
+                        }});
+
+                        document.getElementById("status").textContent =
+                            data.accepted ? "Accepted ✓" : "Rejected ✗";
+                        timer = null;
+                        return;
+                    }}
+
+                    const s = data.steps[i];
+
+                    nodes.update({{
+                        id: s.state,
+                        color: {{
+                            background: "#fde68a",
+                            border: "#d97706"
+                        }}
+                    }});
+
+                    edges.update({{
+                        id: s.edge,
+                        color: "#2563eb",
+                        width: 5
+                    }});
+
+                    document.getElementById("status").textContent =
+                        "Reading '" + s.symbol + "': " +
+                        s.state + " → " + s.next;
+
+                    timer = setTimeout(() => {{
+                        nodes.update({{
+                            id: s.state,
+                            color: {{ background: "#e5e7eb",
+                                      border: "#6b7280" }}
+                        }});
+
+                        edges.update({{
+                            id: s.edge,
+                            color: "#9ca3af",
+                            width: 2
+                        }});
+
+                        nodes.update({{
+                            id: s.next,
+                            color: {{ background: "#bfdbfe",
+                                      border: "#2563eb" }}
+                        }});
+
+                        i++;
+                        timer = setTimeout(step, data.delay);
+                    }}, data.delay);
+                }}
+
+                step();
+            }}
+
+            document.getElementById("play").onclick = play;
+            document.getElementById("reset").onclick = reset;
+        }})();
+        </script>
+        """
+
+        html = html.replace("</body>", script + "</body>")
+
+        with open(output, "w", encoding="utf-8") as f:
+            f.write(html)
+
+        return html
+        
         
