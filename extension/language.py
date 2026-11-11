@@ -2,29 +2,14 @@ from automata.fa.dfa import DFA
 from automata.fa.nfa import NFA
 from automata.fa.gnfa import GNFA
 import automata.fa.fa as fa
-from automate import AutomataExtended
-from typing import (
-    AbstractSet,
-    Any,
-    Callable,
-    DefaultDict,
-    Deque,
-    Dict,
-    FrozenSet,
-    Generator,
-    Iterator,
-    List,
-    Mapping,
-    Optional,
-    Set,
-    Tuple,
-    Type,
-    cast,
-)
 
 class Language():
 
     REGEX_OPERATORS = {"|", "*", "(", ")", "ε", "∅", "?"}
+
+    #-------------------------------------------
+    #Constructeur
+    #-------------------------------------------
 
     def __init__(self, alphabet: set, regex):
         self.alphabet = alphabet
@@ -55,9 +40,12 @@ class Language():
     @classmethod
     def from_regex(cls, alphabet: set, regex):
         return cls(alphabet, regex)
-        
 
-    def accept(word, self): #Je suis pas trop sûr de ce que language veut dire
+    #-------------------------------------------
+    #autre fonctions
+    #-------------------------------------------
+
+    def accept(self ,word): #Je suis pas trop sûr de ce que language veut dire
         nfa = NFA.from_regex(self.regex, input_symbols=self.alphabet)
         return nfa.accepts_input(word)
 
@@ -113,34 +101,40 @@ class Language():
             f"({self.regex})*"
         )
 
-    #alors j'ai pas vérifier ça, c'est l'ia qui me l'a pondu , Je sais aussi pas ce que doit faire la fonction:
+    #! alors j'ai pas vérifier ça, c'est l'ia qui me l'a pondu , Je sais aussi pas ce que doit faire la fonction:
     def to_cfg(self):
         dfa = self.to_dfa()
-
-        # Step 1: Give each state a grammar variable.
+    
+        # Assign one grammar variable to each DFA state.
+        # Using the state's index avoids relying on the state object's name.
+        states = list(dfa.states)
         variables = {
             state: f"Q{i}"
-            for i, state in enumerate(dfa.states)
+            for i, state in enumerate(states)
         }
-
-        # Step 2: Create an empty set of rules for each variable.
+    
+        # Start with no productions for each variable.
         productions = {
             variables[state]: set()
-            for state in dfa.states
+            for state in states
         }
-
-        # Step 3: Convert every transition into a grammar rule.
-        for state, transitions in dfa.transitions.items():
-            for symbol, target in transitions.items():
+    
+        # For each DFA transition:
+        #   state --symbol--> target
+        # add the grammar rule:
+        #   Q_state -> symbol Q_target
+        for state in states:
+            for symbol, target in dfa.transitions.get(state, {}).items():
                 productions[variables[state]].add(
                     (symbol, variables[target])
                 )
-
-        # Step 4: Allow the grammar to stop at accepting states.
+    
+        # A final DFA state can stop, so add an epsilon production.
         for state in dfa.final_states:
             productions[variables[state]].add(())
-
+    
         return {
             "start": variables[dfa.initial_state],
             "productions": productions,
         }
+    
