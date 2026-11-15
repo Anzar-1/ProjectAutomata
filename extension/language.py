@@ -59,41 +59,48 @@ class Language():
         )
         return DFA.from_nfa(nfa, minify= True)
 
-    def reverse(self) -> None:
-        nfa1 = NFA.from_regex(self.regex, input_symbols=self.alphabet)
-        dfa = DFA.from_nfa(nfa1)
+    def _replace_with_nfa(self, nfa):
+        """Store an equivalent regex for an NFA in this Language."""
+        dfa = DFA.from_nfa(nfa)
         self.regex = GNFA.from_dfa(dfa).to_regex()
-        self.alphabet = dfa.input_symbols
-
-    def concatenate(self, l2) -> None:
+        self.alphabet = set(dfa.input_symbols)
+    
+    
+    def reverse(self):
+        nfa = NFA.from_regex(
+            self.regex,
+            input_symbols=self.alphabet,
+        )
+        reversed_nfa = nfa.reverse()
+        self._replace_with_nfa(reversed_nfa)
+    
+    
+    def concatenate(self, other):
         nfa1 = NFA.from_regex(self.regex, input_symbols=self.alphabet)
-        nfa2 = NFA.from_regex(l2.regex, input_symbols=l2.alphabet)
-
-        nfa1.concatenate(nfa2)
-        dfa = DFA.from_nfa(nfa1)
-
-        self.regex = GNFA.from_dfa(dfa).to_regex()
-        self.alphabet = dfa.input_symbols
-
-    def union(self,l2) -> None:
+        nfa2 = NFA.from_regex(other.regex, input_symbols=other.alphabet)
+    
+        combined_nfa = nfa1.concatenate(nfa2)
+        self.alphabet = self.alphabet | other.alphabet
+        self._replace_with_nfa(combined_nfa)
+    
+    
+    def union(self, other):
         nfa1 = NFA.from_regex(self.regex, input_symbols=self.alphabet)
-        nfa2 = NFA.from_regex(l2.regex, input_symbols=l2.alphabet)
-
-        nfa1.union(nfa2)
-        dfa = DFA.from_nfa(nfa1)
-
-        self.regex = GNFA.from_dfa(dfa).to_regex()
-        self.alphabet = dfa.input_symbols
-
-    def shuffle(self,l2) -> None:
+        nfa2 = NFA.from_regex(other.regex, input_symbols=other.alphabet)
+    
+        combined_nfa = nfa1.union(nfa2)
+        self.alphabet = self.alphabet | other.alphabet
+        self._replace_with_nfa(combined_nfa)
+    
+    
+    def shuffle(self, other):
         nfa1 = NFA.from_regex(self.regex, input_symbols=self.alphabet)
-        nfa2 = NFA.from_regex(l2.regex, input_symbols=l2.alphabet)
-
-        nfa1.shuffle_product(nfa2)
-        dfa = DFA.from_nfa(nfa1)
-
-        self.regex = GNFA.from_dfa(dfa).to_regex()
-        self.alphabet = dfa.input_symbols
+        nfa2 = NFA.from_regex(other.regex, input_symbols=other.alphabet)
+    
+        combined_nfa = nfa1.shuffle_product(nfa2)
+        self.alphabet = self.alphabet | other.alphabet
+        self._replace_with_nfa(combined_nfa)
+    
 
     def star(self):
         return Language(
