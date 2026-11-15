@@ -25,6 +25,9 @@ import json
 from collections import defaultdict
 from pyvis.network import Network
 
+from pathlib import Path
+import math
+
 
 import numpy as np
 from PIL import Image
@@ -169,81 +172,100 @@ class AutomataExtended(DFA):
         return visited
 
 
-    def coaccessible_states(self): #Retourne l'ensemble des états coaccessible.
-        states = set(self.states)
-        final_states = self.final_states
-        co_accessible_states = []
-        visited = []
-        for state in states : 
-            visited = self.accessible_states(state)
-            for final_state in final_states:
-                if (final_state in visited) and (final_state not in co_accessible_states):
-                    co_accessible_states.append(state)
-
-        return co_accessible_states
-
-    def trim(self): #émonde l'automate (lui enleve les etats non accessible et non coaccessible)
-        accessible_states =self.accessible_states(self.initial_state)
-        coaccessible_states = self.coaccessible_states()
-        trimmed_states = set(accessible_states and coaccessible_states)
-
+    def coaccessible_states(self):
+    # Build reverse edges: each target maps to the states that lead to it.
+        predecessors = {state: set() for state in self.states}
+    
+        for state, outgoing in self.transitions.items():
+            for target in outgoing.values():
+                predecessors[target].add(state)
+    
+        # Starting from final states, walk backward through the graph.
+        coaccessible = set(self.final_states)
+        to_visit = list(self.final_states)
+    
+        while to_visit:
+            state = to_visit.pop()
+    
+            for predecessor in predecessors[state]:
+                if predecessor not in coaccessible:
+                    coaccessible.add(predecessor)
+                    to_visit.append(predecessor)
+    
+        return coaccessible
+    
+    
+    def trim(self):
+        accessible = self.accessible_states(self.initial_state)
+        coaccessible = self.coaccessible_states()
+        trimmed_states = accessible & coaccessible
+    
         if self.initial_state not in trimmed_states:
-            print("The initial state is not coaccessible")
-            return DFA(
+            # The language is empty. Return one non-final state with no transitions.
+            return AutomataExtended(
                 states={self.initial_state},
-                input_symbols=self.input_symbols,
-                transitions={'q0': {'1': 'q0'},},
+                input_symbols=set(self.input_symbols),
+                transitions={self.initial_state: {}},
                 initial_state=self.initial_state,
                 final_states=set(),
-                allow_partial=True
-        )
-
+                allow_partial=True,
+            )
+    
         trimmed_transitions = {
             state: {
-                symbol: self.transitions[state][symbol]
-                for symbol in self.input_symbols
-                if symbol in self.transitions[state].keys()
-                if self.transitions[state][symbol] in trimmed_states
+                symbol: target
+                for symbol, target in self.transitions.get(state, {}).items()
+                if target in trimmed_states
             }
             for state in trimmed_states
-        }        
-
+        }
+    
         return AutomataExtended(
             states=trimmed_states,
-            input_symbols=self.input_symbols,
+            input_symbols=set(self.input_symbols),
             transitions=trimmed_transitions,
             initial_state=self.initial_state,
-            final_states=self.final_states and trimmed_states,
-            allow_partial= True  
+            final_states=set(self.final_states) & trimmed_states,
+            allow_partial=True,
         )
+    
 
 
-    def reverse(self):#Renverser l'automate. ça renverse pas les états initiaux et finaux tho.
+    def reverse(self):
         states = set(self.states)
-        input_symbols = set(self.input_symbols)
-        final_states = self.final_states
+    
+        new_initial = object()
+        while new_initial in states:
+            new_initial = object()
+        states.add(new_initial)
+    
+        # Include an empty-string (epsilon) transition for every state.
         transitions = {
-                    state: dict(self.transitions[state])
-                    for state in self.states
-                }
-        new_transitions = {state: {symbol: set() for symbol in input_symbols} for state in states}
-
-        print(transitions)
-
-        for state in states:
-            for symbol in input_symbols:
-                if symbol in self.transitions[state].keys():
-                    destination = self.transitions[state][symbol]
-                    new_transitions[destination][symbol].add(state)
-
-        return DFA.from_nfa(NFA(
+            state: {
+                **{symbol: set() for symbol in self.input_symbols},
+                "": set(),
+            }
+            for state in states
+        }
+    
+        # Reverse each original transition.
+        for state, outgoing in self.transitions.items():
+            for symbol, destination in outgoing.items():
+                transitions[destination][symbol].add(state)
+    
+        # Start the reversed NFA at every original final state.
+        transitions[new_initial][""].update(self.final_states)
+    
+        reversed_nfa = NFA(
             states=states,
-            input_symbols=input_symbols,
-            transitions=new_transitions,
-            initial_state=self.initial_state,
-            final_states=final_states,
-            allow_partial= True           
-        ))
+            input_symbols=set(self.input_symbols),
+            transitions=transitions,
+            initial_state=new_initial,
+            final_states={self.initial_state},
+        )
+    
+        return DFA.from_nfa(reversed_nfa)
+    
 
     def print_pair_table(self,show_round: bool): #ça imprime la table là des paires equivalent/dinstingable
 
@@ -413,23 +435,21 @@ class AutomataExtended(DFA):
 
 
     def is_equivalent(self,other) -> bool: #Verifie si les deux languages sont equivalents
-        first_automate = GNFA.from_dfa(self).to_regex()
-        second_automate = GNFA.from_dfa(other).to_regex()
+        first_automate = GNFA.from_dfa(self.minify()).to_regex()
+        second_automate = GNFA.from_dfa(other.minify()).to_regex() #Je suis pas sur pour le coup.
 
         return first_automate == second_automate
     
     def laguage_equal(self,other) -> bool: #Verifie si les deux languages sont equivalents
-            first_automate = GNFA.from_dfa(self).to_regex()
-            second_automate = GNFA.from_dfa(other).to_regex()
+            first_automate = GNFA.from_dfa(self.minify()).to_regex()
+            second_automate = GNFA.from_dfa(other.minify()).to_regex() #Je suis pas sur non plus.
     
             return first_automate == second_automate
 
     def language_disjoint(self, other) -> bool:
         return self.isdisjoint(other)
 
-    def language_subset(self, other) -> bool: #Verifie si le language de l'un d'entre eu est subset de l'autre
-        #De base j'avais l'intention de le faire avec regex, mais je viens de me rendre compte que y a une 
-        #fonction pour ça issuperset(re1, re2, *, input_symbols=None)
+    def language_subset(self, other) -> bool: 
 
         not_self = self.complementarity()
         not_other = other.complementarity()
@@ -438,7 +458,6 @@ class AutomataExtended(DFA):
 
         return (intersection_other_in_self.isempty() or intersection_self_in_other.isempty())
 
-    #J'ai pas encore fait "is isomorphic" parce que je sais pas ce que ça veut dire.
 
     #-------------------------------------------------------
     #Transformation vers d'autres formats
@@ -448,23 +467,105 @@ class AutomataExtended(DFA):
         image = Image.open(file_name).convert("RGB")
         image.save("output.pdf")
 
-    def to_TikZ(self, file_name): #Je sais pas trop encore pour ça.
-        img = Image.open(file_name).convert("RGB")
 
-        with open("output.tex", "w") as f:
-            f.write(r"\begin{tikzpicture}" + "\n")
+    def to_TikZ(self, file_name="automaton.tex"):
+        """Export this DFA as a standalone TikZ automaton diagram."""
 
-            for y in range(img.height):
-                for x in range(img.width):
-                    r, g, b = img.getpixel((x, y))
+        def tex_escape(value):
+            """Escape common LaTeX special characters in labels."""
+            text = str(value)
+            replacements = {
+                "\\": r"\textbackslash{}",
+                "&": r"\&",
+                "%": r"\%",
+                "$": r"\$",
+                "#": r"\#",
+                "_": r"\_",
+                "{": r"\{",
+                "}": r"\}",
+                "~": r"\textasciitilde{}",
+                "^": r"\textasciicircum{}",
+            }
+            return "".join(replacements.get(char, char) for char in text)
 
-                    if (r, g, b) != (255, 255, 255):
-                        f.write(
-                            f"\\fill[fill={{rgb,255:red,{r};green,{g};blue,{b}}}] "
-                            f"({x},{-y}) rectangle ({x+1},{-y-1});\n"
-                        )
+        states = sorted(self.states, key=str)
+        if not states:
+            raise ValueError("Cannot draw a DFA with no states.")
 
-            f.write(r"\end{tikzpicture}" + "\n")
+        # TikZ node IDs are generated separately from displayed state labels.
+        node_id = {state: f"state{i}" for i, state in enumerate(states)}
+
+        # Place states evenly around a circle.
+        radius = max(2.5, len(states) * 0.7)
+        positions = {}
+        for i, state in enumerate(states):
+            angle = math.pi / 2 - 2 * math.pi * i / len(states)
+            positions[state] = (radius * math.cos(angle), radius * math.sin(angle))
+
+        lines = [
+            r"\documentclass{article}",
+            r"\usepackage{tikz}",
+            r"\usetikzlibrary{automata,arrows.meta}",
+            r"\pagestyle{empty}",
+            r"\begin{document}",
+            r"\begin{tikzpicture}[>=Stealth,",
+            r"  every state/.style={minimum size=20pt},",
+            r"  initial text={},",
+            r"  shorten >=1pt]",
+        ]
+
+        # Draw states. Final states are double circles.
+        for state in states:
+            x, y = positions[state]
+            options = ["state"]
+            if state in self.final_states:
+                options.append("accepting")
+            if state == self.initial_state:
+                options.append("initial")
+
+            lines.append(
+                rf"\node[{','.join(options)}] ({node_id[state]}) "
+                rf"at ({x:.3f},{y:.3f}) {{{tex_escape(state)}}};"
+            )
+
+        # Combine symbols that share the same source and destination.
+        grouped_edges = {}
+        for source, outgoing in self.transitions.items():
+            for symbol, target in outgoing.items():
+                if source not in node_id or target not in node_id:
+                    continue
+                grouped_edges.setdefault((source, target), []).append(str(symbol))
+
+        # Draw one labeled edge per source/destination pair.
+        for (source, target), symbols in sorted(
+            grouped_edges.items(), key=lambda item: (str(item[0][0]), str(item[0][1]))
+        ):
+            label = ", ".join(tex_escape(symbol) for symbol in sorted(symbols))
+
+            if source == target:
+                lines.append(
+                    rf"\path[->] ({node_id[source]}) edge[loop above] "
+                    rf"node {{{label}}} ({node_id[target]});"
+                )
+            else:
+                # Bend edges in opposite directions for readability when
+                # transitions exist in both directions.
+                reverse_exists = (target, source) in grouped_edges
+                bend = "bend left=12" if reverse_exists else ""
+                lines.append(
+                    rf"\path[->] ({node_id[source]}) edge[{bend}] "
+                    rf"node[midway, above] {{{label}}} ({node_id[target]});"
+                )
+
+        lines.extend([
+            r"\end{tikzpicture}",
+            r"\end{document}",
+        ])
+
+        output_path = Path(file_name)
+        output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return str(output_path)
+
 
     def to_svg(self, filename):
         try:
@@ -507,29 +608,32 @@ class AutomataExtended(DFA):
     #Run et animation
     #-------------------------------------------------------
 
-    def run(self,word: str):
-        state= self.initial_state
-        path: list =[]; path.append(state)
-        transitions = {
-                            state: dict(self.transitions[state])
-                            for state in self.states
-                        }
-        alphabet = self.input_symbols
-        i: int = 0
+    def run(self, word: str):
+        state = self.initial_state
+        path = [state]
+        i = 0
 
-        while(i!=len(word) and word[i] in alphabet and word[i] in transitions[state]):
-            state = transitions[state][word[i]]
+        while i < len(word):
+            symbol = word[i]
+
+            if symbol not in self.input_symbols:
+                break
+
+            next_state = self.transitions.get(state, {}).get(symbol)
+            if next_state is None:
+                break
+
+            state = next_state
             path.append(state)
-            i+=1
+            i += 1
 
-        if state in self.final_states:
-            path.append("accept")
-        else:
-            path.append("reject")
+        accepted = i == len(word) and state in self.final_states
+        result = "accept" if accepted else "reject"
+        path.append(result)
 
-        print(f" " + " -> ".join(path))
-
+        print(" -> ".join(map(str, path)))
         return path
+
 
 
     def animate(self, input_string, delay=800, output="dfa.html"):
